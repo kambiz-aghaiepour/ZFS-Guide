@@ -38,7 +38,7 @@ snapshots, weekly encrypted B2 chain, verified restore drills, and a disaster ru
         │  dataset: tank/backup → /backup                                 │
         │       encryption=aes-256-gcm  (key: /etc/zfs/zfs.key, 0400 root)│
         │       compression=zstd                                          │
-        │  snapshots: daily×14 / weekly×8 / monthly×6 (zfs-snapshot.sh)    │
+        │  snapshots: daily×14 / weekly×8 / monthly×12 / yearly×3 (zfs-snapshot.sh)    │
         └──────────────┬──────────────────────────────────┬───────────────┘
                        │ zfs send -w (raw/encrypted)      │ .zfs/snapshot/
                        ▼                                  ▼
@@ -178,13 +178,14 @@ ownership.
 
 ### The script
 
-`/usr/local/sbin/zfs-snapshot.sh` — daily (keep 14), weekly (keep 8), monthly (keep 6):
+`/usr/local/sbin/zfs-snapshot.sh` — daily (keep 14), weekly (keep 8), monthly (keep 12),
+yearly (keep 3):
 
 ```bash
 #!/bin/bash
 set -euo pipefail
-DS="tank/backup"; DAILY_KEEP=14; WEEKLY_KEEP=8; MONTHLY_KEEP=6
-TODAY=$(date +%F); DOW=$(date +%u); DOM=$(date +%d)
+DS="tank/backup"; DAILY_KEEP=14; WEEKLY_KEEP=8; MONTHLY_KEEP=12; YEARLY_KEEP=3
+TODAY=$(date +%F); DOW=$(date +%u); DOM=$(date +%d); MON=$(date +%m)
 
 snap() { # snap <kind> <name> <keep>
     local kind="$1" name="$2" keep="$3" full="${DS}@${name}"
@@ -200,6 +201,7 @@ snap() { # snap <kind> <name> <keep>
 snap daily "daily-${TODAY}" "$DAILY_KEEP"
 [ "$DOW" = "7" ] && snap weekly "weekly-${TODAY}" "$WEEKLY_KEEP"
 [ "$DOM" = "01" ] && snap monthly "monthly-${TODAY}" "$MONTHLY_KEEP"
+[ "$MON" = "01" ] && [ "$DOM" = "01" ] && snap yearly "yearly-${TODAY}" "$YEARLY_KEEP"
 exit 0
 ```
 
@@ -369,9 +371,22 @@ b2:zfs-backup/
   ...
 ```
 
-- Only the **weekly** chain is offsite. `daily-*`/`monthly-*` are local-only.
+- Only the **weekly** chain is offsite. `daily-*`/`monthly-*`/`yearly-*` are local-only.
 - Every object is ciphertext (`-w`); B2 cannot read it.
 - Restore = download base + deltas in chronological order (see §9).
+
+**Why weekly and not daily?** The upload script explicitly selects `@weekly-` snapshots
+(`zfs list … | grep '@weekly-' | sort -r | head -n1`) — a deliberate design, not a
+limitation: (1) B2 is the *disaster* copy (drives lost), where a 1-week RPO
+(recovery point objective) matters less than the local quick-recovery path; daily
+granularity lives locally, where `.zfs/snapshot` restores are instant. (2) Cost is
+dominated by the **base** object (one full stream per dataset: 2.45 TB ≈ $17/mo at
+$6.95/TB); adding daily sends adds 7× objects/operations and a much denser incremental
+chain for marginal benefit (deltas are small, but weekly keeps the chain and its pruning
+simple). (3) One chain per dataset = clean ordering: base, then deltas replayed in
+chronological order; mixing daily/weekly/monthly into a single object namespace breaks
+that linear replay. If you ever want daily offsite, give `daily-*` its own chain/object
+prefix (or a second remote prefix) instead of reusing `base.zfs`.
 
 ## 8. Step 5 — Restore drills
 
@@ -432,8 +447,9 @@ systemctl enable --now zfs-snapshot.timer zfs-b2-upload.timer
 ```
 
 **What the restore reconstructs:** every `weekly-*` snapshot in the chain (base carries
-its own snapshot; each delta carries the next). **Not reconstructed:** `daily-*` and
-`monthly-*` (local-only). After a disaster you have ~weekly granularity, not daily.
+its own snapshot; each delta carries the next). **Not reconstructed:** `daily-*`,
+`monthly-*` and `yearly-*` (local-only). After a disaster you have ~weekly granularity,
+not daily.
 
 ### Single file from B2 (older than local retention)
 
