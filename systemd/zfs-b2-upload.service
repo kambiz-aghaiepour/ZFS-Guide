@@ -1,0 +1,9 @@
+[Unit]
+Description=Weekly encrypted ZFS send of the backup dataset to Backblaze B2
+Requires=zfs.target
+Wants=network-online.target
+After=zfs.target zfs-snapshot.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zfs-b2-upload.sh

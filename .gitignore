@@ -1,0 +1,6 @@
+# Never commit credentials or local state
+rclone.conf
+*.key
+*.secret
+.env
+*.log

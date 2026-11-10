@@ -1,0 +1,8 @@
+# Daily rsync of critical directories into the backup dataset.
+# Replace <user> and <hostname>. The target directories must be owned by the
+# cron user; see Step 3 in the guide:
+#   sudo install -d -o <user> -g <user> /backup/<hostname>/home/<user>/Documents
+# Start early enough that every copy finishes before the 02:00 snapshot.
+15 1 * * * rsync -a --delete --partial /home/<user>/Documents/ /backup/<hostname>/home/<user>/Documents/ >> /home/<user>/rsync-backup.log 2>&1
+20 1 * * * rsync -a --delete --partial /home/<user>/Pictures/  /backup/<hostname>/home/<user>/Pictures/  >> /home/<user>/rsync-backup.log 2>&1
+25 1 * * * rsync -a --delete --partial /home/<user>/Projects/  /backup/<hostname>/home/<user>/Projects/  >> /home/<user>/rsync-backup.log 2>&1

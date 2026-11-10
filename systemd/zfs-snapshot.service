@@ -1,0 +1,8 @@
+[Unit]
+Description=ZFS snapshots of the backup dataset (daily/weekly/monthly/yearly with retention)
+Requires=zfs.target
+After=zfs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/zfs-snapshot.sh

@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily ZFS snapshot of the backup dataset
+
+[Timer]
+OnCalendar=*-*-* 02:00:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
