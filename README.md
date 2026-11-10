@@ -23,6 +23,7 @@ drills, a local restore runbook, and a disaster/rebuild runbook.
 | Path | Purpose |
 |---|---|
 | `README.md` | this guide |
+| `docs/RECONSTRUCTION.md` | reconstruction runbook and offsite vault inventory |
 | `scripts/zfs-snapshot.sh` | snapshot creation + retention (daily/weekly/monthly/yearly) |
 | `scripts/zfs-b2-upload.sh` | raw encrypted B2 upload, `--dry-run`, `--drill` |
 | `systemd/` | service and timer units for both scripts |
@@ -31,7 +32,9 @@ drills, a local restore runbook, and a disaster/rebuild runbook.
 | `.gitignore` | keeps local credentials and state out of git |
 
 Unless noted, run install commands from the root of a checkout of this
-repository.
+repository. Use [docs/RECONSTRUCTION.md](docs/RECONSTRUCTION.md) when
+recovering from zero, rebuilding a dataset, or verifying that the offsite
+vault is sufficient.
 
 ---
 
@@ -597,6 +600,8 @@ scripts or units. B2 egress is free up to 3x your average stored data volume
 Use this when the original host is gone. You need the B2 application key, the
 ZFS dataset key (byte-exact, with its recorded SHA-256), the bucket name, and a
 machine with enough storage. Step 8 covers rebuilding only the pool/dataset.
+The complete runbook, vault inventory, decision tree, and clean-room test are
+in [docs/RECONSTRUCTION.md](docs/RECONSTRUCTION.md).
 
 ```bash
 # 1. Install ZFS and rclone on the recovery host.
@@ -696,7 +701,8 @@ no scratch space.
 
 Use this when the pool or dataset is lost/damaged, or when moving the volume to
 new disks. It rebuilds the local container; data comes from B2 (Step 7) or from
-the original files.
+the original files. The end-to-end runbook is in
+[docs/RECONSTRUCTION.md](docs/RECONSTRUCTION.md).
 
 ### A. Try importing first
 
@@ -851,7 +857,9 @@ prompts at boot unless stored in a file.)
 the kernel. After reboot the `zfs-load-key@` unit fails, `/backup` does not
 mount, and boot itself is fine. Restore the byte-identical file (verify
 SHA-256). Different bytes mean permanently unreadable data. Keep at least two
-offsite copies.
+offsite copies. The complete vault inventory, storage guidance, rotation
+rules, and clean-room test are in
+[docs/RECONSTRUCTION.md](docs/RECONSTRUCTION.md).
 
 **Is local restoration encrypted-but-recoverable?** Yes: `zfs load-key` (from
 the keyfile or prompt) plus `zfs mount`. `zfs change-key` can rewrap the DEK to
