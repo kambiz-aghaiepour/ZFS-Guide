@@ -6,12 +6,15 @@ it offsite to Backblaze B2 with end-to-end encryption, restoring files locally
 or from B2, and recovering from a lost pool — including the guide author's own
 failure modes.
 
-**Audience:** Linux sysadmins. Fedora/RPM systems are shown; adapt per distro.
+**Audience:** Linux sysadmins. Fedora/RHEL, Debian/Ubuntu, Arch, and openSUSE
+examples are shown; adapt per distro.
 **Result:** a raidz1 pool with an AES-256-GCM encrypted dataset, rsync-fed
 daily/weekly/monthly snapshots, a weekly encrypted B2 chain, verified restore
 drills, a local restore runbook, and a disaster/rebuild runbook.
 
-> Validated against OpenZFS 2.4.x and rclone 1.75.x on Fedora 44. The helper
+> Validated against OpenZFS 2.4.x and rclone 1.75.x on Fedora 44. The
+> distribution commands for Debian/Ubuntu, Arch, RHEL, and openSUSE follow
+> upstream OpenZFS documentation and were not exercised on this host. The helper
 > scripts and units are shipped as real files; the restore drill was exercised
 > end-to-end against B2 and the upload logic was tested against a local rclone
 > remote. Commands need root unless noted.
@@ -122,21 +125,243 @@ vault is sufficient.
 
 ## 3. Step 0 — Install OpenZFS
 
-OpenZFS is not in Fedora's repos; use the official repository (DKMS packages,
-rebuilt on kernel updates):
+OpenZFS is out-of-tree on most Linux distributions. Use your distribution's
+supported package path — the official OpenZFS repository on Fedora/RHEL
+derivatives, `contrib` on Debian, the in-kernel module on Ubuntu, or ArchZFS on
+Arch. Commands assume `sudo`; the package names below are the ones the OpenZFS
+project documents. For a distribution not listed here (Alpine, Gentoo,
+Slackware, and others), follow the upstream
+[Getting Started](https://openzfs.github.io/openzfs-docs/Getting%20Started/index.html)
+page and the common post-install checks at the end of this section.
+
+| Distribution | Package source | Kernel module | Notes |
+|---|---|---|---|
+| Fedora | `zfs-release` + `zfs` | DKMS | matching `kernel-devel` required |
+| RHEL 8/9/10, Rocky, Alma, CentOS Stream | `zfs-release` + `zfs` or `zfs-kmod` | kABI kmod or DKMS | EL rebuilds can use kABI; Stream uses DKMS |
+| openSUSE Leap/Tumbleweed | `filesystems` project repo | DKMS/kmod | community repo, not official openSUSE |
+| Debian | `contrib` + `zfs-dkms` | DKMS | `contrib` and headers required |
+| Ubuntu | `universe` + `zfsutils-linux` | in-kernel | DKMS only for custom kernels |
+| Arch | ArchZFS repo | kernel-specific or DKMS | package must match the exact kernel |
+
+### Fedora
 
 ```bash
-# Fedora (match your version)
+# 1. Add the OpenZFS repository. The release RPM matches your Fedora version.
 sudo dnf install -y https://zfsonlinux.org/fedora/zfs-release-3-1$(rpm --eval "%{dist}").noarch.rpm
-sudo dnf install -y zfs                    # pulls zfs-dkms; needs matching kernel-devel
-sudo modprobe zfs && zfs version | head -n1
+
+# 2. Matching headers for the running kernel, then ZFS (DKMS).
+sudo dnf install -y kernel-devel-$(uname -r)
+sudo dnf install -y zfs
+
+# 3. Load and verify.
+sudo modprobe zfs
+zfs version | head -n1
 echo 'zfs' | sudo tee /etc/modules-load.d/zfs.conf    # load the module at boot
 ```
 
-- Install `kernel-devel-$(uname -r | cut -d- -f1)` before `zfs`.
-- The package enables `zfs.target` and the import/mount units
-  (`sudo systemctl enable zfs.target` if not).
-- `zfs-zed` maintains the mount-generator cache; keep it running (§5C).
+- If `kernel-devel-$(uname -r)` is unavailable, install `kernel-devel` (the
+  metapackage for the current Fedora kernel), or boot a kernel with matching
+  headers before building the module.
+- Remove the unsupported `zfs-fuse` package first if it is installed:
+  `sudo rpm -e --nodeps zfs-fuse`.
+- Fedora 41+ `zfs-release` provides `zfs-latest` and `zfs-legacy` repositories;
+  the default is fine. Link: [OpenZFS Fedora](https://openzfs.github.io/openzfs-docs/Getting%20Started/Fedora/index.html).
+
+### RHEL, Rocky Linux, AlmaLinux, CentOS Stream (EL8–EL10)
+
+```bash
+# 1. Add the OpenZFS repository.
+sudo dnf install -y https://zfsonlinux.org/epel/zfs-release-3-0$(rpm --eval "%{dist}").noarch.rpm
+```
+
+Then choose **one** module path.
+
+**kABI-tracking kmod (recommended for distro kernels).** It does not need
+`kernel-devel` and is rebuilt for each supported EL kernel:
+
+```bash
+# EL8/EL9 (DNF4): dnf-plugins-core provides config-manager.
+sudo dnf install -y dnf-plugins-core
+sudo dnf config-manager --disable zfs
+sudo dnf config-manager --enable zfs-kmod
+
+# EL10 (DNF5): dnf5-plugins provides config-manager, and the flags are
+# subcommands instead:
+# sudo dnf install -y dnf5-plugins
+# sudo dnf config-manager disable zfs
+# sudo dnf config-manager enable zfs-kmod
+
+sudo dnf install -y zfs
+```
+
+**DKMS (custom or non-distro kernels):**
+
+```bash
+sudo dnf install -y epel-release
+sudo dnf install -y kernel-devel-$(uname -r)
+sudo dnf install -y zfs
+```
+
+Finish with:
+
+```bash
+sudo modprobe zfs
+zfs version | head -n1
+echo 'zfs' | sudo tee /etc/modules-load.d/zfs.conf
+```
+
+- The `zfs-release` default repository is DKMS. Uninstall the kABI `kmod-zfs`
+  packages before switching to DKMS, and vice versa; see
+  [OpenZFS RHEL-based](https://openzfs.github.io/openzfs-docs/Getting%20Started/RHEL-based%20distro/index.html).
+- kABI kmods are only verified against distribution-provided, non-Stream
+  kernels. **CentOS Stream, Oracle Linux UEK, and custom kernels should use
+  DKMS.**
+- On an EL minor-version upgrade, reinstall `kmod-zfs` if `modprobe zfs` fails
+  with a kernel-module version mismatch.
+
+### openSUSE Leap and Tumbleweed
+
+ZFS is in the community `filesystems` project, not the official openSUSE
+repositories.
+
+```bash
+# Tumbleweed (verified repository URL)
+sudo zypper addrepo https://download.opensuse.org/repositories/filesystems/openSUSE_Tumbleweed/filesystems.repo
+sudo zypper --gpg-auto-import-keys refresh
+sudo zypper install -y zfs
+
+sudo modprobe zfs
+zfs version | head -n1
+echo 'zfs' | sudo tee /etc/modules-load.d/zfs.conf
+```
+
+For Leap, use the matching repository listed at
+[software.opensuse.org — filesystems/zfs](https://software.opensuse.org/download.html?project=filesystems&package=zfs);
+do not reuse the Tumbleweed URL. These packages are maintained by the
+community project, so review the repository and signing key before enabling it.
+
+### Debian
+
+ZFS packages are in `contrib`. Enable it first: in `/etc/apt/sources.list`
+use `main contrib`, or in a deb822 `.sources` file set
+`Components: main contrib non-free-firmware`, then:
+
+```bash
+sudo apt update
+sudo apt install -y linux-headers-$(uname -r)
+sudo apt install -y zfs-dkms zfsutils-linux zfs-zed
+
+sudo modprobe zfs
+zfs version | head -n1
+```
+
+- If `linux-headers-$(uname -r)` is not available, install the
+  `linux-headers-<arch>` metapackage (for example `linux-headers-amd64`) and
+  boot the matching kernel.
+- `zfs-dkms` rebuilds on each kernel update; keep headers installed.
+- For a newer OpenZFS than the release ships, enable `<codename>-backports`
+  and pin `src:zfs-linux`; see
+  [OpenZFS Debian](https://openzfs.github.io/openzfs-docs/Getting%20Started/Debian/index.html).
+  Do not mix the release and backports packages.
+
+### Ubuntu and Ubuntu-based distributions
+
+Ubuntu's default kernels include the ZFS module, so the userspace packages are
+enough on a stock kernel:
+
+```bash
+sudo apt update
+sudo apt install -y zfsutils-linux zfs-zed
+
+sudo modprobe zfs
+zfs version | head -n1
+```
+
+- `zfsutils-linux` is in `universe`; enable it if your install disabled it.
+- For a custom kernel, or if `modprobe zfs` reports the module missing, install
+  DKMS and matching headers:
+  `sudo apt install -y zfs-dkms linux-headers-$(uname -r)`.
+- Linux Mint, Pop!_OS, and similar distributions that use Ubuntu kernels follow
+  this section; those with their own kernels need DKMS and their kernel
+  headers.
+- Link: [OpenZFS Ubuntu](https://openzfs.github.io/openzfs-docs/Getting%20Started/Ubuntu/index.html).
+
+### Arch Linux and Arch-based distributions
+
+The maintained binary repository is **ArchZFS**. The old `archzfs.com`
+repository is stale; the current repository is published from GitHub releases.
+
+```bash
+# 1. Import and locally sign the ArchZFS release key.
+#    Verify this fingerprint against the release page before signing.
+sudo pacman-key --init
+sudo pacman-key --recv-keys 3A9917BF0DED5C13F69AC68FABEC0A1208037BE9
+sudo pacman-key --finger 3A9917BF0DED5C13F69AC68FABEC0A1208037BE9
+sudo pacman-key --lsign-key 3A9917BF0DED5C13F69AC68FABEC0A1208037BE9
+```
+
+Add the repository to `/etc/pacman.conf`:
+
+```ini
+[archzfs]
+SigLevel = Required
+Server = https://github.com/archzfs/archzfs/releases/download/experimental
+```
+
+Then install the package that matches your kernel:
+
+```bash
+sudo pacman -Syu zfs-linux               # stock 'linux' kernel
+# alternatives: zfs-linux-lts, zfs-linux-hardened, zfs-linux-zen
+# custom kernel:  sudo pacman -Syu zfs-dkms <kernel>-headers
+sudo modprobe zfs
+zfs version | head -n1
+```
+
+- The prebuilt `zfs-linux*` package must match the running kernel exactly.
+  Do not partial-upgrade kernel and ZFS separately; ArchZFS may lag behind a
+  kernel release, so keep the matching kernel package until ZFS catches up.
+- Do not install `zfs-linux` and `zfs-dkms` together.
+- ArchZFS's AUR packages (`zfs-dkms`, `zfs-utils`) are the alternative for
+  kernels not covered by the binary repository. Build them with an AUR helper
+  after installing the matching kernel headers.
+- On Manjaro or EndeavourOS, use DKMS with that distribution's kernel headers;
+  the ArchZFS prebuilt packages track Arch's kernels, not Manjaro's.
+- Link: [ArchZFS releases](https://github.com/archzfs/archzfs/releases/tag/experimental)
+  and [ArchWiki: ZFS](https://wiki.archlinux.org/title/ZFS).
+
+### Common post-install checks
+
+```bash
+sudo modprobe zfs
+zfs version
+zpool status            # "no pools available" is fine before Step 1
+```
+
+- If `modprobe zfs` fails, check `dmesg | grep -i zfs`. The usual causes are a
+  kernel newer than the packaged module, missing/mismatched headers for DKMS,
+  or Secure Boot rejecting an unsigned module.
+- With Secure Boot enabled, either use distribution-signed kmod packages or
+  enroll the DKMS/MOK signing key. Check `mokutil --sb-state`; follow your
+  distribution's DKMS signing instructions.
+- Install `rclone` separately: `sudo dnf install -y rclone` on Fedora/RHEL
+  (RHEL may need EPEL), `sudo apt install -y rclone` on Debian/Ubuntu, or
+  `sudo pacman -S rclone` on Arch.
+- Install the `zfs-zed` package where it is separate (Debian/Ubuntu) and keep
+  `zfs-zed.service` running; the mount-generator cache in §5C depends on it.
+- The helper scripts use `/usr/sbin/zfs` and `/usr/bin/rclone`. Verify with
+  `command -v zfs rclone` and adjust the scripts if your distribution installs
+  them elsewhere.
+
+### Primary references
+
+- [OpenZFS Getting Started](https://openzfs.github.io/openzfs-docs/Getting%20Started/index.html)
+- [Fedora](https://openzfs.github.io/openzfs-docs/Getting%20Started/Fedora/index.html)
+- [RHEL-based distributions](https://openzfs.github.io/openzfs-docs/Getting%20Started/RHEL-based%20distro/index.html)
+- [Debian](https://openzfs.github.io/openzfs-docs/Getting%20Started/Debian/index.html)
+- [Ubuntu](https://openzfs.github.io/openzfs-docs/Getting%20Started/Ubuntu/index.html)
+- [Arch Linux](https://openzfs.github.io/openzfs-docs/Getting%20Started/Arch%20Linux/index.html)
+- [openSUSE](https://openzfs.github.io/openzfs-docs/Getting%20Started/openSUSE/index.html)
 
 ## 4. Step 1 — Create the pool
 

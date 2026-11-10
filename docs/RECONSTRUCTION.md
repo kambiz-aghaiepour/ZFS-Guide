@@ -429,7 +429,8 @@ Do this quarterly and after any credential/key change.
 1. Use a spare VM, container, or host with no access to the original system.
 2. Install rclone; restore the B2 stanza/credentials; run
    `rclone lsd b2:zfs-backup`.
-3. Install OpenZFS; restore `zfs.key`; verify the 32-byte length and SHA-256.
+3. Install OpenZFS ([Step 0](../README.md#3-step-0--install-openzfs)); restore
+   `zfs.key`; verify the 32-byte length and SHA-256.
 4. Receive `base.zfs` plus at least one delta into a scratch dataset, load the
    key, mount it, and hash a known file. A full-chain drill is better.
 5. Verify the password-manager emergency kit opens the vault on a separate
