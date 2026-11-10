@@ -451,18 +451,13 @@ the bucket is outside the key's scope. A bucket-scoped key does not
 necessarily have permission to list all buckets; `b2:zfs-backup` is the safe
 target.
 
-### C. Install the upload script and timer
+### C. Install the upload script, seed the chain, and enable the timer
 
 ```bash
 sudo install -m 755 scripts/zfs-b2-upload.sh /usr/local/sbin/
 sudo install -m 644 systemd/zfs-b2-upload.service systemd/zfs-b2-upload.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now zfs-b2-upload.timer
 ```
-
-The upload timer runs Mondays at 03:00 with `Persistent=true`, after the
-Sunday weekly snapshot. The service orders itself after `zfs-snapshot.service`
-and `network-online.target`.
 
 Before the first upload, ensure a weekly snapshot exists. On a fresh install
 you may not have one until Sunday:
@@ -471,6 +466,24 @@ you may not have one until Sunday:
 sudo /usr/local/sbin/zfs-snapshot.sh
 sudo zfs list -t snapshot -o name tank/backup | grep '@weekly-' \
   || sudo zfs snapshot "tank/backup@weekly-$(date +%F)"
+```
+
+Seed the chain and verify it before enabling the timer:
+
+```bash
+sudo /usr/local/sbin/zfs-b2-upload.sh --dry-run
+sudo /usr/local/sbin/zfs-b2-upload.sh      # full base on the first run
+sudo rclone lsl b2:zfs-backup
+```
+
+Expected: `uploaded N bytes to b2:zfs-backup/base.zfs (verified)` and `OK`.
+
+The upload timer runs Mondays at 03:00 with `Persistent=true`, after the
+Sunday weekly snapshot. The service orders itself after `zfs-snapshot.service`
+and `network-online.target`. Enable it once the first upload succeeded:
+
+```bash
+sudo systemctl enable --now zfs-b2-upload.timer
 ```
 
 ### D. What the upload script does
@@ -623,15 +636,14 @@ sudo zfs get keystatus,mountpoint tank/backup
 sudo zfs list -t snapshot tank/backup
 sudo zpool scrub tank
 
-# 8. Reinstall scripts/units and seed the chain state so the next upload is
-#    incremental instead of a fresh base.
+# 8. Reinstall scripts/units, seed the chain state, then enable the timers.
 sudo install -m 755 scripts/zfs-snapshot.sh scripts/zfs-b2-upload.sh /usr/local/sbin/
 sudo install -m 644 systemd/*.service systemd/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now zfs-snapshot.timer zfs-b2-upload.timer
 sudo install -d -m 755 /var/lib/zfs-backup
 sudo zfs list -H -o name -t snapshot tank/backup | grep '@weekly-' | sort -r | head -1 \
   | sudo tee /var/lib/zfs-backup/.base_snap >/dev/null
+sudo systemctl enable --now zfs-snapshot.timer zfs-b2-upload.timer
 
 # 9. Copy the restored data back into the user's home.
 sudo rsync -a /backup/<hostname>/home/<user>/Documents/ /home/<user>/Documents/
@@ -775,7 +787,6 @@ step.
 sudo install -m 755 scripts/zfs-snapshot.sh scripts/zfs-b2-upload.sh /usr/local/sbin/
 sudo install -m 644 systemd/*.service systemd/*.timer /etc/systemd/system/
 sudo systemctl daemon-reload
-sudo systemctl enable --now zfs-snapshot.timer zfs-b2-upload.timer
 
 sudo /usr/local/sbin/zfs-snapshot.sh
 sudo zfs list -t snapshot -o name tank/backup | grep '@weekly-' \
@@ -784,6 +795,9 @@ sudo zfs list -t snapshot -o name tank/backup | grep '@weekly-' \
 sudo /usr/local/sbin/zfs-b2-upload.sh --dry-run
 sudo /usr/local/sbin/zfs-b2-upload.sh
 sudo /usr/local/sbin/zfs-b2-upload.sh --drill
+
+# Enable the timers only after the first upload and drill succeed.
+sudo systemctl enable --now zfs-snapshot.timer zfs-b2-upload.timer
 ```
 
 ### F. Rebuild only the dataset (pool intact)
