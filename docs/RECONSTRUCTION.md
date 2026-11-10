@@ -70,6 +70,39 @@ values in the vault.
 - Never rely on a copy inside the vault's own backup that can only be opened
   with a recovery key stored in that same vault.
 
+### Using the recovery-kit helper
+
+[`scripts/zfs-recovery-kit.sh`](../scripts/zfs-recovery-kit.sh) packages the
+restorable files. It is a convenience, not a replacement for the inventory
+above.
+
+```bash
+# Create a timestamped kit in $HOME (run as root):
+sudo scripts/zfs-recovery-kit.sh --create
+
+# Inspect and restore a kit:
+sudo scripts/zfs-recovery-kit.sh --restore /path/to/zfs-recovery-kit-<timestamp>.tar.gz
+
+# Usage:
+scripts/zfs-recovery-kit.sh --help
+```
+
+- The kit contains `/etc/zfs/zfs.key`,
+  `/root/.config/rclone/rclone.conf`, `/etc/zfs-backup.conf` when present,
+  plus `MANIFEST` and `SHA256SUMS`.
+- The `.tar.gz` is **not encrypted**. Encrypt it (age/GPG), store the result
+  in the vault, and record the archive SHA-256 printed by `--create`.
+- `--restore` inspects the archive, requires `zfs.key` and `rclone.conf`, warns
+  about missing optional files, verifies `SHA256SUMS` when present, checks the
+  key length, and aborts if any target file already exists. It restores
+  `zfs.key` as `0400 root:root` and `rclone.conf` as `0600 root:root`.
+- It does not include Backblaze account recovery codes, the password-manager
+  emergency kit, or host credentials; keep those in the vault separately.
+- It restores files only; it does not receive the chain or start timers.
+  Continue with §4 or README Steps 7-8 afterward.
+- To restore onto a host that already has these files, move them aside first;
+  the script deliberately refuses to overwrite them.
+
 ### What not to store where
 
 - Do not commit keys, rclone configs, or account recovery codes to git.
@@ -142,6 +175,15 @@ The detailed install and pool commands are in the main guide:
 ---
 
 ## 4. Full reconstruction from zero
+
+If you have a recovery kit, restore it first and skip §4.1-§4.2:
+
+```bash
+sudo scripts/zfs-recovery-kit.sh --restore /path/to/zfs-recovery-kit-<timestamp>.tar.gz
+```
+
+It validates the archive and refuses to overwrite existing targets. Then
+continue at §4.3.
 
 ### 4.1 Restore and verify the dataset key
 
@@ -431,5 +473,6 @@ Do not test recovery by deleting production backups.
 - [Key custody and FAQ](../README.md#13-key-custody-and-faq)
 - [Snapshot script](../scripts/zfs-snapshot.sh)
 - [B2 upload/drill script](../scripts/zfs-b2-upload.sh)
+- [Recovery kit script](../scripts/zfs-recovery-kit.sh)
 - [Optional config](../examples/zfs-backup.conf)
 - [rsync cron template](../examples/rsync-documents.cron)

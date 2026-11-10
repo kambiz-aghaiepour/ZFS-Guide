@@ -26,6 +26,7 @@ drills, a local restore runbook, and a disaster/rebuild runbook.
 | `docs/RECONSTRUCTION.md` | reconstruction runbook and offsite vault inventory |
 | `scripts/zfs-snapshot.sh` | snapshot creation + retention (daily/weekly/monthly/yearly) |
 | `scripts/zfs-b2-upload.sh` | raw encrypted B2 upload, `--dry-run`, `--drill` |
+| `scripts/zfs-recovery-kit.sh` | create/restore a timestamped kit for the ZFS key and rclone config |
 | `systemd/` | service and timer units for both scripts |
 | `examples/zfs-backup.conf` | optional overrides for datasets, remote, retention |
 | `examples/rsync-documents.cron` | cron template for the critical-file copies |
@@ -859,7 +860,10 @@ mount, and boot itself is fine. Restore the byte-identical file (verify
 SHA-256). Different bytes mean permanently unreadable data. Keep at least two
 offsite copies. The complete vault inventory, storage guidance, rotation
 rules, and clean-room test are in
-[docs/RECONSTRUCTION.md](docs/RECONSTRUCTION.md).
+[docs/RECONSTRUCTION.md](docs/RECONSTRUCTION.md). The helper
+`scripts/zfs-recovery-kit.sh --create` packages the key and root's rclone
+config into a timestamped tarball; encrypt that archive before storing it.
+`--restore` refuses to overwrite existing target files.
 
 **Is local restoration encrypted-but-recoverable?** Yes: `zfs load-key` (from
 the keyfile or prompt) plus `zfs mount`. `zfs change-key` can rewrap the DEK to

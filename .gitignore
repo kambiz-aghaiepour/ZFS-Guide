@@ -4,3 +4,6 @@ rclone.conf
 *.secret
 .env
 *.log
+
+# Recovery kits contain plaintext credentials; encrypt them before offsite storage
+zfs-recovery-kit-*.tar.gz
